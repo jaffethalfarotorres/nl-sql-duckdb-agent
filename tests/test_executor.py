@@ -143,3 +143,29 @@ def test_the_database_file_is_byte_identical_after_attacks(db_path):
 
 def test_table_names_lists_every_base_table_including_hidden_ones(executor):
     assert executor.table_names() == ("customers", "order_items", "orders", "payroll", "products")
+
+
+def test_engine_types_are_converted_to_json_friendly_values(executor):
+    result = executor.run(
+        unchecked(
+            "SELECT INTERVAL 2 DAY AS i, '00000000-0000-0000-0000-000000000001'::UUID AS u, "
+            r"'\xAA'::BLOB AS b, [1, 2] AS l, {'k': DATE '2025-01-02'} AS s, "
+            "TIMESTAMP '2025-01-02 03:04:05' AS ts"
+        )
+    )
+    assert result.rows == (
+        (
+            "2 days, 0:00:00",
+            "00000000-0000-0000-0000-000000000001",
+            "aa",
+            [1, 2],
+            {"k": "2025-01-02"},
+            "2025-01-02T03:04:05",
+        ),
+    )
+
+
+def test_unparseable_sql_is_a_fixable_engine_error(executor):
+    with pytest.raises(QueryError) as info:
+        executor.run(unchecked("SELECT count(* FROM orders"))
+    assert info.value.fixable

@@ -355,3 +355,7 @@ def test_lexer_never_accepts_what_duckdb_parses_as_several_statements():
         parser.close()
     assert dangerous > 300, "the fuzzer must keep exercising the dangerous region"
     assert disagreements == []
+
+
+def test_engine_layer_reports_a_statement_with_only_comments_as_empty(validator):
+    assert rules(validator.engine_check("-- nothing here")[0]) == {"empty"}

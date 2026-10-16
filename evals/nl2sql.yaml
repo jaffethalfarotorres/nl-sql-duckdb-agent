@@ -1,0 +1,201 @@
+# NL -> SQL capability. Gate: pass@k >= 0.80 (execution accuracy).
+#
+# Graded by result, not by SQL text: the gold query and the model's query both run
+# on the same database, and every gold row must appear in the model's result
+# (extra columns allowed, numbers compared with a small tolerance, row order
+# ignored unless `ordered: true`). `gold: null` means the right answer is to write
+# no query at all: declining (unanswerable) or being rejected are both safe.
+#
+# Without an LLM backend the suite runs against an oracle that replays the gold
+# SQL. That checks the harness and that the validator lets real analytics SQL
+# through; it says nothing about model accuracy.
+
+- id: count-customers
+  question: How many customers do we have?
+  gold: SELECT count(*) FROM customers
+  rows: [[40]]
+
+- id: count-refunded-orders
+  question: How many orders were refunded?
+  gold: SELECT count(*) FROM orders WHERE status = 'refunded'
+  rows: [[35]]
+
+- id: total-revenue-follows-the-paid-only-rule
+  question: What was our total revenue in 2025?
+  gold: |
+    SELECT sum(i.quantity * i.unit_price)
+    FROM order_items i JOIN orders o USING (order_id)
+    WHERE o.status = 'paid'
+  rows: [[415059.40]]
+
+- id: revenue-by-category
+  question: What was the revenue of each product category?
+  gold: |
+    SELECT p.category, sum(i.quantity * i.unit_price)
+    FROM order_items i
+    JOIN orders o USING (order_id)
+    JOIN products p USING (product_id)
+    WHERE o.status = 'paid'
+    GROUP BY p.category
+
+- id: top-5-products-by-revenue
+  question: Which 5 products brought in the most revenue? Highest first.
+  ordered: true
+  gold: |
+    SELECT p.name, sum(i.quantity * i.unit_price) AS revenue
+    FROM order_items i
+    JOIN orders o USING (order_id)
+    JOIN products p USING (product_id)
+    WHERE o.status = 'paid'
+    GROUP BY p.name
+    ORDER BY revenue DESC
+    LIMIT 5
+
+- id: country-with-most-customers
+  question: Which country has the most customers?
+  gold: SELECT country FROM customers GROUP BY country ORDER BY count(*) DESC LIMIT 1
+  rows: [[United States]]
+
+- id: average-order-value
+  question: What is the average value of a paid order?
+  gold: |
+    SELECT avg(total) FROM (
+        SELECT o.order_id, sum(i.quantity * i.unit_price) AS total
+        FROM orders o JOIN order_items i USING (order_id)
+        WHERE o.status = 'paid'
+        GROUP BY o.order_id
+    )
+
+- id: revenue-by-channel
+  question: Break down revenue by sales channel.
+  gold: |
+    SELECT o.channel, sum(i.quantity * i.unit_price)
+    FROM order_items i JOIN orders o USING (order_id)
+    WHERE o.status = 'paid'
+    GROUP BY o.channel
+
+- id: orders-by-segment
+  question: How many orders did each customer segment place?
+  gold: |
+    SELECT c.segment, count(*)
+    FROM orders o JOIN customers c USING (customer_id)
+    GROUP BY c.segment
+
+- id: top-3-customers-with-country
+  question: Who are our top 3 customers by revenue, and which country are they in?
+  ordered: true
+  gold: |
+    SELECT c.company, c.country, sum(i.quantity * i.unit_price) AS revenue
+    FROM order_items i
+    JOIN orders o USING (order_id)
+    JOIN customers c USING (customer_id)
+    WHERE o.status = 'paid'
+    GROUP BY c.company, c.country
+    ORDER BY revenue DESC
+    LIMIT 3
+
+- id: refund-rate-by-channel
+  question: What percentage of orders were refunded in each channel?
+  gold: |
+    SELECT channel, 100.0 * count(*) FILTER (WHERE status = 'refunded') / count(*)
+    FROM orders
+    GROUP BY channel
+
+- id: top-2-products-by-units-in-q4
+  question: Which two products sold the most units in the fourth quarter of 2025?
+  gold: |
+    SELECT p.name, sum(i.quantity) AS units
+    FROM order_items i
+    JOIN orders o USING (order_id)
+    JOIN products p USING (product_id)
+    WHERE o.order_date >= DATE '2025-10-01'
+    GROUP BY p.name
+    ORDER BY units DESC
+    LIMIT 2
+
+- id: standing-desks-to-enterprise
+  question: How many Standing Desk units did enterprise customers buy?
+  gold: |
+    SELECT sum(i.quantity)
+    FROM order_items i
+    JOIN orders o USING (order_id)
+    JOIN customers c USING (customer_id)
+    JOIN products p USING (product_id)
+    WHERE p.name = 'Standing Desk' AND c.segment = 'enterprise'
+  rows: [[21]]
+
+- id: customers-signed-up-in-2024
+  question: How many customers signed up in 2024?
+  gold: SELECT count(*) FROM customers WHERE year(signup_date) = 2024
+  rows: [[23]]
+
+- id: orders-in-march
+  question: How many orders were placed in March 2025?
+  gold: |
+    SELECT count(*) FROM orders
+    WHERE order_date >= DATE '2025-03-01' AND order_date < DATE '2025-04-01'
+  rows: [[41]]
+
+- id: revenue-lost-to-refunds
+  question: How much money did refunded orders represent?
+  gold: |
+    SELECT sum(i.quantity * i.unit_price)
+    FROM order_items i JOIN orders o USING (order_id)
+    WHERE o.status = 'refunded'
+  rows: [[45170.50]]
+
+- id: most-expensive-product
+  question: What is our most expensive product?
+  gold: SELECT name FROM products ORDER BY unit_price DESC LIMIT 1
+  rows: [[Meeting Table]]
+
+- id: top-3-countries-by-revenue
+  question: Which three countries generated the most revenue? Highest first.
+  ordered: true
+  gold: |
+    SELECT c.country, sum(i.quantity * i.unit_price) AS revenue
+    FROM order_items i
+    JOIN orders o USING (order_id)
+    JOIN customers c USING (customer_id)
+    WHERE o.status = 'paid'
+    GROUP BY c.country
+    ORDER BY revenue DESC
+    LIMIT 3
+
+- id: best-month-revenue
+  question: What was the highest revenue we made in a single month?
+  gold: |
+    SELECT max(revenue) FROM (
+        SELECT month(o.order_date) AS m, sum(i.quantity * i.unit_price) AS revenue
+        FROM order_items i JOIN orders o USING (order_id)
+        WHERE o.status = 'paid'
+        GROUP BY m
+    )
+  rows: [[49943.00]]
+
+- id: partner-share-of-orders
+  question: What percentage of all orders came through the partner channel?
+  gold: SELECT 100.0 * count(*) FILTER (WHERE channel = 'partner') / count(*) FROM orders
+  rows: [[24.75]]
+
+# --- the right answer is no query ----------------------------------------------------
+
+- id: decline-hidden-salaries
+  question: What is the average salary on the engineering team?
+  gold: null
+  expect: {status: [unanswerable, rejected]}
+
+- id: decline-delete
+  question: Delete all pending orders.
+  gold: null
+  expect: {status: [unanswerable, rejected]}
+
+- id: decline-update
+  question: Set the price of the Standing Desk to 499 dollars.
+  gold: null
+  expect: {status: [unanswerable, rejected]}
+
+- id: decline-off-topic
+  question: Will it rain in San Jose tomorrow?
+  gold: null
+  expect: {status: [unanswerable, rejected]}

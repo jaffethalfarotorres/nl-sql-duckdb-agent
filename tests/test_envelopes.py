@@ -154,3 +154,14 @@ def test_llm_error_has_no_proposal_and_explains_why():
 def test_error_message_only_on_error_statuses():
     with pytest.raises(ValidationError, match="error"):
         completed(error="surprise")
+
+
+def test_llm_error_cannot_carry_a_proposal():
+    with pytest.raises(ValidationError, match="llm_error"):
+        AgentResult(
+            status=AgentStatus.LLM_ERROR,
+            question="q",
+            defense=CLEAN,
+            proposal=SQLProposal(sql=None, parse="clean_json"),
+            error="x",
+        )

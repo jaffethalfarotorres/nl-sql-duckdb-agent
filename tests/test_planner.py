@@ -111,3 +111,8 @@ def test_a_repair_prompt_shows_the_failed_query_and_error_as_untrusted_data():
     assert "Binder Error: revenue" in prompt
     assert prompt.count("<untrusted_input>") == 2
     assert prompt.index("Binder Error") > prompt.index("Revenue by month?")
+
+
+def test_a_stray_brace_in_the_prose_does_not_hide_the_json():
+    proposal = planner_with(f"Use {{curly}} quoting carefully. {reply()}").propose("q")
+    assert proposal.sql == SQL
