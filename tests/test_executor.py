@@ -139,3 +139,7 @@ def test_the_database_file_is_byte_identical_after_attacks(db_path):
             with pytest.raises(QueryError):
                 ex.run(unchecked(sql))
     assert file_digest(db_path) == before
+
+
+def test_table_names_lists_every_base_table_including_hidden_ones(executor):
+    assert executor.table_names() == ("customers", "order_items", "orders", "payroll", "products")

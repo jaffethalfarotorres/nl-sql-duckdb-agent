@@ -155,6 +155,11 @@ class Executor:
             elapsed_ms=round(elapsed_ms, 3),
         )
 
+    def table_names(self) -> tuple[str, ...]:
+        """Every base table in the database, allowlisted or not."""
+        rows = self._con.execute("SELECT table_name FROM duckdb_tables() ORDER BY 1").fetchall()
+        return tuple(name for (name,) in rows)
+
     def describe(self, tables: Iterable[str]) -> str:
         """Schema text for the prompt, generated from the catalog and its comments."""
         wanted = list(tables)
