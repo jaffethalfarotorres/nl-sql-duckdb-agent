@@ -194,6 +194,10 @@ database unchanged: yes
 - The first dataset build took ~8 s: the DuckDB Python client retries a failed
   `numpy`/`pandas` import for every bound parameter. Inserting each table as one
   JSON parameter takes under 0.1 s.
+- With the external-access guard disabled, a mutant's attack really worked:
+  `COPY orders TO 'leak.csv'` wrote a file into the working tree, and a commit swept
+  it up. The pre-publish scan of the full git history caught it before the first
+  push; the history was rewritten and mutants now run from a throwaway directory.
 
 ## Project layout
 

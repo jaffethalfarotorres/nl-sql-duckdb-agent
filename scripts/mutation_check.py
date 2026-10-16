@@ -5,13 +5,18 @@
 Each mutant rewrites one line of the source, runs the test suite and restores
 the file, so a guard that no test depends on shows up as SURVIVED. It edits
 files in place: if it is interrupted, ``git checkout -- src`` restores them.
-Takes a few minutes; not part of CI.
+
+pytest runs from a throwaway working directory: with a guard disabled, an attack
+in the tests may really succeed (``COPY orders TO 'leak.csv'`` writes a file), and
+that file must land there, not in the repository. Takes a few minutes; not part
+of CI.
 """
 
 from __future__ import annotations
 
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -68,13 +73,15 @@ def main() -> int:
             continue
         path.write_text(original.replace(old, new), encoding="utf-8", newline="\n")
         try:
-            run = subprocess.run(
-                [sys.executable, "-m", "pytest", "-x", "-q", "-p", "no:cacheprovider"],
-                cwd=REPO,
-                capture_output=True,
-                text=True,
-                timeout=600,
-            )
+            with tempfile.TemporaryDirectory() as scratch:
+                run = subprocess.run(
+                    [sys.executable, "-m", "pytest", str(REPO / "tests"), "-x", "-q",
+                     "-p", "no:cacheprovider"],
+                    cwd=scratch,
+                    capture_output=True,
+                    text=True,
+                    timeout=600,
+                )  # fmt: skip
         finally:
             path.write_text(original, encoding="utf-8", newline="\n")
         caught = run.returncode != 0
