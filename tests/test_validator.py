@@ -98,6 +98,45 @@ def test_lexer_rejects(validator, sql, rule):
     assert all(v.layer is Layer.LEXER for v in violations)
 
 
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT * FROM information_schema.tables",
+        "SELECT * FROM pg_catalog.pg_class",
+        "SELECT * FROM sqlite_master",
+        "SELECT * FROM duckdb_tables",
+        "SELECT * FROM pg_tables",
+    ],
+)
+def test_lexer_refuses_system_catalog_names(validator, sql):
+    assert "denied_identifier" in rules(validator.lexical_check(sql))
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT * FROM payroll",
+        'SELECT * FROM "PAYROLL"',
+        "SELECT * FROM main.payroll",
+        "WITH payroll AS (SELECT 1 AS x) SELECT * FROM payroll",
+    ],
+)
+def test_lexer_refuses_identifiers_that_name_a_known_hidden_table(sql):
+    v = SQLValidator(PUBLIC_TABLES, denied_names=["Payroll"])
+    try:
+        assert "denied_identifier" in rules(v.lexical_check(sql))
+    finally:
+        v.close()
+
+
+def test_a_hidden_table_name_inside_a_string_is_just_data():
+    v = SQLValidator(PUBLIC_TABLES, denied_names=["payroll"])
+    try:
+        assert v.validate("SELECT 'payroll' AS word").ok
+    finally:
+        v.close()
+
+
 def test_lexer_reports_each_denied_keyword_once(validator):
     violations = validator.lexical_check("SELECT 1 FROM t WHERE drop AND DROP AND insert")
     assert sorted(v.detail for v in violations if v.rule == "denied_keyword") == [

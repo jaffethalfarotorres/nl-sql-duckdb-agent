@@ -9,7 +9,8 @@ with two independent layers. Either one rejects on its own.
    ``DROP`` inside them is data, not code. On the token stream it enforces: exactly
    one statement, a leading ``SELECT`` or ``WITH``, no denied keyword (DDL, DML,
    files, extensions, session state) and no denied function (file readers,
-   ``query()``, catalog functions). Lexical forms whose boundaries depend on the
+   ``query()``, catalog functions) and no identifier that names a system catalog or
+   a known table outside the allowlist. Lexical forms whose boundaries depend on the
    engine dialect (``E'...'`` strings, ``$$`` quoting, nested comments) are rejected
    outright: when the guard cannot be sure how the engine will tokenize something,
    it refuses it.
@@ -65,6 +66,12 @@ DENIED_FUNCTION_PREFIXES = (
     "read_", "parquet_", "pragma_", "duckdb_", "sqlite_", "postgres_", "mysql_",
     "iceberg_", "delta_",
 )  # fmt: skip
+# Identifiers that only ever name system catalogs. A blunt lexical check that does not
+# depend on the parser; the engine layer's allowlist catches the same reads precisely.
+DENIED_IDENTIFIERS = frozenset(
+    {"information_schema", "pg_catalog", "sqlite_master", "sqlite_schema", "sqlite_temp_master"}
+)
+DENIED_IDENTIFIER_PREFIXES = ("duckdb_", "pg_")
 _LEADING_KEYWORDS = {"SELECT", "WITH"}
 _ALLOWED_SCHEMAS = {"", "main"}
 _ALLOWED_REF_TYPES = {"BASE_TABLE", "SUBQUERY", "JOIN", "EMPTY", "EXPRESSION_LIST", "PIVOT"}
@@ -190,7 +197,7 @@ def _is_denied_function(name: str) -> bool:
     return name in DENIED_FUNCTIONS or name.startswith(DENIED_FUNCTION_PREFIXES)
 
 
-def _lexical_violations(sql: str) -> list[Violation]:
+def _lexical_violations(sql: str, denied_names: frozenset[str]) -> list[Violation]:
     def violation(rule: str, detail: str) -> Violation:
         return Violation(layer=Layer.LEXER, rule=rule, detail=detail)
 
@@ -229,6 +236,19 @@ def _lexical_violations(sql: str) -> list[Violation]:
         and _is_denied_function(t.text)
     )
     found.extend(violation("denied_function", name) for name in functions)
+
+    identifiers = dict.fromkeys(
+        name
+        for t in tokens
+        if t.kind in (TokenKind.WORD, TokenKind.QUOTED)
+        and (name := t.text.lower()) not in functions
+        and (
+            name in DENIED_IDENTIFIERS
+            or name.startswith(DENIED_IDENTIFIER_PREFIXES)
+            or name in denied_names
+        )
+    )
+    found.extend(violation("denied_identifier", name) for name in identifiers)
     return found
 
 
@@ -285,17 +305,25 @@ def _walk(node: Any, scope: frozenset[str], refs: list[str], others: list[str]) 
 
 
 class SQLValidator:
-    """Two-layer read-only validator. ``allowed_tables=None`` turns the allowlist off."""
+    """Two-layer read-only validator.
+
+    ``allowed_tables=None`` turns the allowlist off. ``denied_names`` are table names
+    the lexer refuses wherever they appear as identifiers (the agent passes every
+    catalog table outside the allowlist): a blunt check that cannot tell a table
+    from a column, which is why it is a denylist of known names and not the policy.
+    """
 
     def __init__(
         self,
         allowed_tables: Iterable[str] | None = None,
         *,
+        denied_names: Iterable[str] = (),
         max_chars: int = DEFAULT_MAX_CHARS,
     ) -> None:
         self.allowed = (
             None if allowed_tables is None else frozenset(t.lower() for t in allowed_tables)
         )
+        self.denied_names = frozenset(name.lower() for name in denied_names)
         self.max_chars = max_chars
         self._parser = duckdb.connect(":memory:", config=_PARSER_CONFIG)
 
@@ -315,7 +343,7 @@ class SQLValidator:
 
     def lexical_check(self, sql: str) -> list[Violation]:
         """Layer 1 on its own."""
-        return _lexical_violations(sql)
+        return _lexical_violations(sql, self.denied_names)
 
     def engine_check(self, sql: str) -> tuple[list[Violation], tuple[str, ...]]:
         """Layer 2 on its own. Returns the violations and the base tables read."""
