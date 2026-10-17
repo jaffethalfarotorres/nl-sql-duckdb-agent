@@ -17,6 +17,11 @@ from nl_sql_agent.providers.base import (
     require_env,
 )
 
+# Transport retries, not answer retries: the SDK waits the server's retry-after on a 429
+# or 5xx and sends the same request again. The free tier allows 8,000 tokens per minute
+# per model, which a full eval run exceeds; the SDK default of 2 retries gave up mid-run.
+MAX_RETRIES = 6
+
 
 class GroqBackend(LLMBackend):
     name = "groq"
@@ -34,7 +39,8 @@ class GroqBackend(LLMBackend):
         env = os.environ if env is None else env
         api_key = require_env(env, "GROQ_API_KEY", backend=cls.name)
         sdk = import_sdk("groq", extra="groq")
-        return cls(sdk.Groq(api_key=api_key), models=models_from_env(env))
+        client = sdk.Groq(api_key=api_key, max_retries=MAX_RETRIES)
+        return cls(client, models=models_from_env(env))
 
     def _complete(self, prompt: str, *, system: str, model: str) -> str:
         response = self._client.chat.completions.create(

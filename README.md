@@ -172,35 +172,6 @@ nl2sql       24    1.00    1.00  pass@k >= 0.80  PASS
 database unchanged: yes
 ```
 
-### Live model
-
-Measured locally on 2026-10-16 against Groq's free tier, 3 runs per case, temperature 0.
-CI cannot repeat this (it has no key), so these numbers are a snapshot, not a gate:
-
-```bash
-python -m nl_sql_agent.eval --backend groq --k 3 --json eval_report.json
-NLSQL_MODEL_SMALL=openai/gpt-oss-120b python -m nl_sql_agent.eval --backend groq --k 3
-```
-
-| Planner (small tier) | Repair (large tier) | nl2sql pass@3 | nl2sql pass^3 | guard pass^3 | DB unchanged |
-|---|---|---|---|---|---|
-| `openai/gpt-oss-20b` (default) | `openai/gpt-oss-120b` | **0.96** (23/24) | **0.96** (23/24) | 1.00 (54/54) | yes |
-| `openai/gpt-oss-120b` | `openai/gpt-oss-120b` | **0.96** (23/24) | **0.96** (23/24) | 1.00 (54/54) | yes |
-
-- All 20 analytics questions but one returned the gold result in every run, and all 4
-  "write no query" cases (hidden salaries, delete, update, off-topic) were declined
-  every time.
-- The one failure is the same for both models in all 6 runs, and it is a question the
-  eval words ambiguously, not a wrong query. For *"Which two products sold the most units
-  in the fourth quarter of 2025?"* both models counted **paid orders only** (USB-C Dock
-  41, Laptop Stand 40). The gold counts every status, refunded and pending included (49
-  each). Same two products, different unit counts. The schema only says that *revenue*
-  counts paid orders, so the gold and the models' reading are both defensible. The case
-  stays as written: rewording an eval case after seeing the model fail it would tune the
-  eval to the model.
-- The guard suite replays scripted attack replies whatever the backend (it plays a
-  compromised model), so its 1.00 tests the validator and executor, not the LLM.
-
 - **Differential fuzzing against DuckDB's parser**: 20,000 seeded cases built from
   quotes, comments, `E'...'`, `$$` and separators. DuckDB parsed 1,737 of them, and
   748 of those as more than one statement or a non-`SELECT`. The lexer rejected
@@ -209,6 +180,37 @@ NLSQL_MODEL_SMALL=openai/gpt-oss-120b python -m nl_sql_agent.eval --backend groq
   of 17 guards (lexer rules, CTE scoping, allowlist, read-only flag, external access,
   no-retry-on-policy, the envelope invariant, the grader itself) was disabled on
   purpose. The suite failed every time: **17/17 caught**.
+
+### Live model
+
+Measured locally against Groq's free tier, 3 runs per case, temperature 0. CI cannot
+repeat this (it has no key), so these numbers are a snapshot, not a gate:
+
+```bash
+python -m nl_sql_agent.eval --backend groq --k 3 --json eval_report.json
+NLSQL_MODEL_SMALL=openai/gpt-oss-120b python -m nl_sql_agent.eval --backend groq --k 3
+```
+
+| Date | Planner (small tier) | Repair (large tier) | nl2sql pass@3 | nl2sql pass^3 | guard pass^3 | DB unchanged |
+|---|---|---|---|---|---|---|
+| 2026-10-17 | `openai/gpt-oss-20b` (default) | `openai/gpt-oss-120b` | **1.00** (24/24) | **1.00** (24/24) | 1.00 (54/54) | yes |
+| 2026-10-17 | `openai/gpt-oss-120b` | `openai/gpt-oss-120b` | **1.00** (24/24) | **1.00** (24/24) | 1.00 (54/54) | yes |
+| 2026-10-16 | `openai/gpt-oss-20b` (default) | `openai/gpt-oss-120b` | 0.96 (23/24) | 0.96 (23/24) | 1.00 (54/54) | yes |
+| 2026-10-16 | `openai/gpt-oss-120b` | `openai/gpt-oss-120b` | 0.96 (23/24) | 0.96 (23/24) | 1.00 (54/54) | yes |
+
+- On 2026-10-17 every analytics question returned the gold result in every run, and
+  all 4 "write no query" cases (hidden salaries, delete, update, off-topic) were
+  declined every time.
+- **One eval case changed between the two dates, and it is the whole difference.** On
+  2026-10-16, for *"Which two products sold the most units in the fourth quarter of
+  2025?"*, both models counted paid orders only in all 6 runs (USB-C Dock 41, Laptop
+  Stand 40), while the gold counts every status, refunded and pending included (49
+  each). The schema only says that *revenue* counts paid orders, so both readings were
+  defensible: the eval was ambiguous, the queries were not wrong. The question now
+  starts with *"Counting every order whatever its status"*. The gold did not change, so
+  the models' old answer would still fail; on 2026-10-17 both followed the instruction.
+- The guard suite replays scripted attack replies whatever the backend (it plays a
+  compromised model), so its 1.00 tests the validator and executor, not the LLM.
 
 ### What the tests found along the way
 
@@ -241,7 +243,14 @@ NLSQL_MODEL_SMALL=openai/gpt-oss-120b python -m nl_sql_agent.eval --backend groq
   the answer (`finish_reason=length` in 5 of 8 direct probes), and the planner
   reported that as `not_json`. The cap is now 2048, and a reply cut at the cap is
   reported as `truncated at max_tokens`, not as bad JSON. pass^3 went from 0.92 to
-  0.96. The eval cases were not touched.
+  0.96, with no eval case changed.
+- **Rate limits scored as wrong answers.** The free tier allows 8,000 tokens per minute
+  per model, and the eval sends its calls back to back. On one rerun the SDK gave up
+  after its default 2 retries and the `429`s counted as failures: pass^3 fell to 0.67 in
+  a run where the model never wrote a wrong query. The Groq client now retries up to 6
+  times, waiting the server's `retry-after`. Those retries resend the same request after
+  a transport error; the agent still never asks the model again after a policy
+  rejection.
 
 ## Project layout
 
@@ -267,12 +276,15 @@ scripts/           mutation_check.py
 - **Live numbers are a local snapshot, not a CI gate.** CI has no provider key, so on
   every push the `nl2sql` suite runs against the oracle: a change that makes the model
   worse would not fail CI. The live numbers above come from one provider (Groq), two
-  models, 24 cases and k=3 on 2026-10-16. Re-run
+  models, 24 cases and k=3 on 2026-10-16 and 2026-10-17. Re-run
   `python -m nl_sql_agent.eval --backend groq --k 3` to refresh them.
-- **One eval case is ambiguous** (`top-2-products-by-units-in-q4`, see Live model): the
-  question does not say whether refunded or pending orders count as units sold. It is
-  scored as a failure as written. Rewording it is a follow-up, and the next
-  measurement should say so next to its numbers.
+- **The suite no longer separates these models.** Both score 1.00 on 24 cases, so it
+  cannot tell a 20B model from a 120B one or catch a small regression. Harder cases
+  (window functions, relative dates, multi-step questions, traps in the business
+  rules) are the next step.
+- **Backend errors count as failures.** A rate limit, a timeout or a truncated reply
+  scores the same as a wrong query, so read the failure text before reading a low
+  number as model accuracy.
 - gpt-oss is not deterministic at temperature 0: the same prompt gave different replies
   across runs, which is why the suite reports pass^k next to pass@k.
 - Only the Groq backend checks for a reply cut at the token cap. On the other

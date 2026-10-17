@@ -101,8 +101,12 @@
     FROM orders
     GROUP BY channel
 
+# Reworded 2026-10-17. The first live run (2026-10-16) showed the old question, "Which
+# two products sold the most units in the fourth quarter of 2025?", had two readings:
+# both models counted paid orders only, the gold counts every status. The gold is
+# unchanged; the question now says which reading it means.
 - id: top-2-products-by-units-in-q4
-  question: Which two products sold the most units in the fourth quarter of 2025?
+  question: Counting every order whatever its status, which two products sold the most units in the fourth quarter of 2025?
   gold: |
     SELECT p.name, sum(i.quantity) AS units
     FROM order_items i

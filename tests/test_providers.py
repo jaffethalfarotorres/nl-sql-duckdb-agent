@@ -118,11 +118,18 @@ def test_missing_sdk_raises_backend_unavailable_with_install_hint(monkeypatch):
 
 
 def test_from_env_builds_a_client_and_reads_model_overrides(monkeypatch):
-    fake_sdk = SimpleNamespace(Groq=lambda api_key: FakeGroqClient("ok"))
-    monkeypatch.setitem(sys.modules, "groq", fake_sdk)
+    built: list[dict[str, object]] = []
+
+    def groq_client(**kwargs: object) -> FakeGroqClient:
+        built.append(kwargs)
+        return FakeGroqClient("ok")
+
+    monkeypatch.setitem(sys.modules, "groq", SimpleNamespace(Groq=groq_client))
     backend = GroqBackend.from_env({"GROQ_API_KEY": "test-key", "NLSQL_MODEL_LARGE": "big"})
     assert backend.models["large"] == "big"
     assert backend.complete(PROMPT, system=SYSTEM) == "ok"
+    # A free-tier eval run hits the per-minute token limit; 2 SDK retries were not enough.
+    assert built == [{"api_key": "test-key", "max_retries": 6}]
 
 
 def test_ollama_needs_no_credentials(monkeypatch):
