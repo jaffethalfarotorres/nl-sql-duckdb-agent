@@ -19,24 +19,29 @@ from nl_sql_agent.providers import (
 )
 
 
-def _openai_shape(text: str | None) -> SimpleNamespace:
+def _openai_shape(text: str | None, finish_reason: str = "stop") -> SimpleNamespace:
     message = SimpleNamespace(content=text)
-    return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+    return SimpleNamespace(choices=[SimpleNamespace(message=message, finish_reason=finish_reason)])
 
 
 class FakeGroqClient:
     """groq.Groq: client.chat.completions.create(...) -> object with choices."""
 
-    def __init__(self, text: str | None = "", error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        text: str | None = "",
+        error: Exception | None = None,
+        finish_reason: str = "stop",
+    ) -> None:
         self.kwargs: list[dict[str, Any]] = []
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
-        self._text, self._error = text, error
+        self._text, self._error, self._finish_reason = text, error, finish_reason
 
     def _create(self, **kwargs: Any) -> SimpleNamespace:
         self.kwargs.append(kwargs)
         if self._error:
             raise self._error
-        return _openai_shape(self._text)
+        return _openai_shape(self._text, self._finish_reason)
 
 
 class FakeHFClient:

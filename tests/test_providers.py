@@ -82,6 +82,12 @@ def test_empty_provider_response_is_a_backend_error():
         backend.complete(PROMPT, system=SYSTEM)
 
 
+def test_a_reply_cut_at_the_token_cap_is_reported_as_truncated_not_as_bad_json():
+    backend = GroqBackend(FakeGroqClient('{"sql": "SELECT p.name FROM', finish_reason="length"))
+    with pytest.raises(BackendError, match="truncated at max_tokens"):
+        backend.complete(PROMPT, system=SYSTEM)
+
+
 def test_watsonx_builds_each_model_once_and_reuses_it():
     factory = FakeWatsonxFactory("ok")
     backend = WatsonxBackend(factory)
@@ -170,9 +176,10 @@ def test_huggingface_from_env_passes_the_token(monkeypatch):
     assert tokens == ["hf_test"]
 
 
-def test_completion_budget_fits_a_multi_line_query():
+def test_completion_budget_fits_reasoning_plus_a_multi_line_query():
     from nl_sql_agent.providers.base import MAX_TOKENS
 
     backend = GroqBackend(FakeGroqClient("ok"))
     backend.complete(PROMPT, system=SYSTEM)
-    assert backend._client.kwargs[0]["max_tokens"] == MAX_TOKENS >= 512
+    # gpt-oss used up to 510 reasoning tokens before writing the JSON in live runs.
+    assert backend._client.kwargs[0]["max_tokens"] == MAX_TOKENS >= 2048

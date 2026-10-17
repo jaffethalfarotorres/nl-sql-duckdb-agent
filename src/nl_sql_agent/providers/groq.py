@@ -9,6 +9,7 @@ from typing import Any, ClassVar
 from nl_sql_agent.envelopes import ModelTier
 from nl_sql_agent.providers.base import (
     MAX_TOKENS,
+    BackendError,
     LLMBackend,
     chat_messages,
     import_sdk,
@@ -20,8 +21,8 @@ from nl_sql_agent.providers.base import (
 class GroqBackend(LLMBackend):
     name = "groq"
     default_models: ClassVar[dict[ModelTier, str]] = {
-        "small": "llama-3.1-8b-instant",
-        "large": "llama-3.3-70b-versatile",
+        "small": "openai/gpt-oss-20b",
+        "large": "openai/gpt-oss-120b",
     }
 
     def __init__(self, client: Any, models: Mapping[ModelTier, str] | None = None) -> None:
@@ -42,4 +43,9 @@ class GroqBackend(LLMBackend):
             temperature=0,
             max_tokens=MAX_TOKENS,
         )
-        return response.choices[0].message.content
+        choice = response.choices[0]
+        # A reply cut at the cap is half a JSON object: say so instead of letting the
+        # planner diagnose it as "not JSON".
+        if getattr(choice, "finish_reason", None) == "length":
+            raise BackendError(f"{self.name}: reply truncated at max_tokens={MAX_TOKENS}")
+        return choice.message.content

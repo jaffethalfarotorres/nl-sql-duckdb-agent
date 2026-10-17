@@ -17,7 +17,9 @@ from typing import ClassVar
 
 from nl_sql_agent.envelopes import ModelTier
 
-MAX_TOKENS = 512  # a SQL query needs more room than a one-line routing verdict
+# The cap covers the whole completion, and reasoning models (gpt-oss on Groq) spend most of
+# it on hidden reasoning before the JSON. At 512, 5 of 8 live replies came back empty or cut.
+MAX_TOKENS = 2048
 
 
 class BackendError(RuntimeError):

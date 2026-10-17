@@ -161,7 +161,7 @@ nl-sql-agent --schema    # exactly what the model is shown
 Measured locally and on every push by [CI](.github/workflows/ci.yml) on Python 3.11,
 3.12 and 3.13:
 
-- **283 tests, 99% line coverage**, no network and no credentials, ~15 s.
+- **284 tests, 99% line coverage**, no network and no credentials, ~15 s.
 - **Eval gates** (`python -m nl_sql_agent.eval`):
 
 ```text
@@ -171,6 +171,35 @@ guard        54    1.00    1.00  pass^k >= 1.00  PASS
 nl2sql       24    1.00    1.00  pass@k >= 0.80  PASS
 database unchanged: yes
 ```
+
+### Live model
+
+Measured locally on 2026-10-16 against Groq's free tier, 3 runs per case, temperature 0.
+CI cannot repeat this (it has no key), so these numbers are a snapshot, not a gate:
+
+```bash
+python -m nl_sql_agent.eval --backend groq --k 3 --json eval_report.json
+NLSQL_MODEL_SMALL=openai/gpt-oss-120b python -m nl_sql_agent.eval --backend groq --k 3
+```
+
+| Planner (small tier) | Repair (large tier) | nl2sql pass@3 | nl2sql pass^3 | guard pass^3 | DB unchanged |
+|---|---|---|---|---|---|
+| `openai/gpt-oss-20b` (default) | `openai/gpt-oss-120b` | **0.96** (23/24) | **0.96** (23/24) | 1.00 (54/54) | yes |
+| `openai/gpt-oss-120b` | `openai/gpt-oss-120b` | **0.96** (23/24) | **0.96** (23/24) | 1.00 (54/54) | yes |
+
+- All 20 analytics questions but one returned the gold result in every run, and all 4
+  "write no query" cases (hidden salaries, delete, update, off-topic) were declined
+  every time.
+- The one failure is the same for both models in all 6 runs, and it is a question the
+  eval words ambiguously, not a wrong query. For *"Which two products sold the most units
+  in the fourth quarter of 2025?"* both models counted **paid orders only** (USB-C Dock
+  41, Laptop Stand 40). The gold counts every status, refunded and pending included (49
+  each). Same two products, different unit counts. The schema only says that *revenue*
+  counts paid orders, so the gold and the models' reading are both defensible. The case
+  stays as written: rewording an eval case after seeing the model fail it would tune the
+  eval to the model.
+- The guard suite replays scripted attack replies whatever the backend (it plays a
+  compromised model), so its 1.00 tests the validator and executor, not the LLM.
 
 - **Differential fuzzing against DuckDB's parser**: 20,000 seeded cases built from
   quotes, comments, `E'...'`, `$$` and separators. DuckDB parsed 1,737 of them, and
@@ -199,6 +228,21 @@ database unchanged: yes
   it up. The pre-publish scan of the full git history caught it before the first
   push; the history was rewritten and mutants now run from a throwaway directory.
 
+### What the live model found that the oracle could not
+
+- **The default Groq models no longer existed.** The first live run scored 0.00:
+  every call came back `404 model_not_found`, because Groq had retired
+  `llama-3.1-8b-instant` and `llama-3.3-70b-versatile`. The tests and the oracle could
+  not notice, because neither calls a provider. The defaults are now `openai/gpt-oss-20b` and
+  `openai/gpt-oss-120b`, the chat models Groq lists today.
+- **Reasoning ate the token budget.** With the old 512-token cap, gpt-oss scored
+  pass@3 0.96 but pass^3 0.92. Some replies were empty and others stopped mid-JSON: the
+  model spent up to 510 of the 512 completion tokens on hidden reasoning before writing
+  the answer (`finish_reason=length` in 5 of 8 direct probes), and the planner
+  reported that as `not_json`. The cap is now 2048, and a reply cut at the cap is
+  reported as `truncated at max_tokens`, not as bad JSON. pass^3 went from 0.92 to
+  0.96. The eval cases were not touched.
+
 ## Project layout
 
 ```text
@@ -220,10 +264,19 @@ scripts/           mutation_check.py
 
 ## Known limitations
 
-- **No live-model numbers yet.** CI has no provider key, so the `nl2sql` suite runs
-  against the oracle. It proves the harness works and that the validator lets 20 real
-  analytics queries through; it does not measure a model. Run
-  `python -m nl_sql_agent.eval --backend groq --k 3` with a key for real numbers.
+- **Live numbers are a local snapshot, not a CI gate.** CI has no provider key, so on
+  every push the `nl2sql` suite runs against the oracle: a change that makes the model
+  worse would not fail CI. The live numbers above come from one provider (Groq), two
+  models, 24 cases and k=3 on 2026-10-16. Re-run
+  `python -m nl_sql_agent.eval --backend groq --k 3` to refresh them.
+- **One eval case is ambiguous** (`top-2-products-by-units-in-q4`, see Live model): the
+  question does not say whether refunded or pending orders count as units sold. It is
+  scored as a failure as written. Rewording it is a follow-up, and the next
+  measurement should say so next to its numbers.
+- gpt-oss is not deterministic at temperature 0: the same prompt gave different replies
+  across runs, which is why the suite reports pass^k next to pass@k.
+- Only the Groq backend checks for a reply cut at the token cap. On the other
+  providers a truncated reply would still show up as `not_json`.
 - The lexer's identifier denylist cannot tell a table from a column: a column named
   like a hidden table, or an unquoted column named like a denied keyword (`set`,
   `show`), is rejected. Quoting it works.
