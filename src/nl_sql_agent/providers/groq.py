@@ -9,7 +9,6 @@ from typing import Any, ClassVar
 from nl_sql_agent.envelopes import ModelTier
 from nl_sql_agent.providers.base import (
     MAX_TOKENS,
-    BackendError,
     LLMBackend,
     chat_messages,
     import_sdk,
@@ -50,8 +49,5 @@ class GroqBackend(LLMBackend):
             max_tokens=MAX_TOKENS,
         )
         choice = response.choices[0]
-        # A reply cut at the cap is half a JSON object: say so instead of letting the
-        # planner diagnose it as "not JSON".
-        if getattr(choice, "finish_reason", None) == "length":
-            raise BackendError(f"{self.name}: reply truncated at max_tokens={MAX_TOKENS}")
+        self._reject_truncated(getattr(choice, "finish_reason", None))
         return choice.message.content

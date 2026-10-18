@@ -62,4 +62,6 @@ class WatsonxBackend(LLMBackend):
             messages=chat_messages(system, prompt),
             params={"temperature": 0, "max_tokens": MAX_TOKENS},
         )
-        return response["choices"][0]["message"]["content"]
+        choice = response["choices"][0]
+        self._reject_truncated(choice.get("finish_reason"))
+        return choice["message"]["content"]

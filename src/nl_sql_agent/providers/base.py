@@ -56,6 +56,13 @@ class LLMBackend(ABC):
     def _complete(self, prompt: str, *, system: str, model: str) -> str:
         """Make exactly one provider call and return the raw reply text."""
 
+    def _reject_truncated(self, finish_reason: object) -> None:
+        """A reply cut at the cap is half a JSON object: say so, instead of letting the
+        planner call it "not JSON". Groq, Hugging Face, watsonx chat and Ollama all
+        report that stop as ``"length"``."""
+        if finish_reason == "length":
+            raise BackendError(f"{self.name}: reply truncated at max_tokens={MAX_TOKENS}")
+
 
 def chat_messages(system: str, prompt: str) -> list[dict[str, str]]:
     return [{"role": "system", "content": system}, {"role": "user", "content": prompt}]

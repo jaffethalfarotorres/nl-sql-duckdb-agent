@@ -40,4 +40,6 @@ class HuggingFaceBackend(LLMBackend):
         response = self._client.chat_completion(
             chat_messages(system, prompt), model=model, max_tokens=MAX_TOKENS
         )
-        return response.choices[0].message.content
+        choice = response.choices[0]
+        self._reject_truncated(getattr(choice, "finish_reason", None))
+        return choice.message.content

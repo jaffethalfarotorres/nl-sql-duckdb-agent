@@ -82,9 +82,10 @@ def test_empty_provider_response_is_a_backend_error():
         backend.complete(PROMPT, system=SYSTEM)
 
 
-def test_a_reply_cut_at_the_token_cap_is_reported_as_truncated_not_as_bad_json():
-    backend = GroqBackend(FakeGroqClient('{"sql": "SELECT p.name FROM', finish_reason="length"))
-    with pytest.raises(BackendError, match="truncated at max_tokens"):
+@pytest.mark.parametrize("name", ["watsonx", "groq", "huggingface", "ollama"])
+def test_a_reply_cut_at_the_token_cap_is_reported_as_truncated_not_as_bad_json(name):
+    backend = all_backends('{"sql": "SELECT p.name FROM', stop="length")[name]
+    with pytest.raises(BackendError, match=f"{name}: reply truncated at max_tokens"):
         backend.complete(PROMPT, system=SYSTEM)
 
 

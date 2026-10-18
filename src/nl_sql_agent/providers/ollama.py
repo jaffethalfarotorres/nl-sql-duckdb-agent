@@ -42,4 +42,5 @@ class OllamaBackend(LLMBackend):
             messages=chat_messages(system, prompt),
             options={"temperature": 0, "num_predict": MAX_TOKENS},
         )
+        self._reject_truncated(response.get("done_reason"))
         return response["message"]["content"]

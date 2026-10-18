@@ -161,7 +161,7 @@ nl-sql-agent --schema    # exactly what the model is shown
 Measured locally and on every push by [CI](.github/workflows/ci.yml) on Python 3.11,
 3.12 and 3.13:
 
-- **284 tests, 99% line coverage**, no network and no credentials, ~15 s.
+- **287 tests, 99% line coverage**, no network and no credentials, ~15 s.
 - **Eval gates** (`python -m nl_sql_agent.eval`):
 
 ```text
@@ -241,9 +241,10 @@ NLSQL_MODEL_SMALL=openai/gpt-oss-120b python -m nl_sql_agent.eval --backend groq
   pass@3 0.96 but pass^3 0.92. Some replies were empty and others stopped mid-JSON: the
   model spent up to 510 of the 512 completion tokens on hidden reasoning before writing
   the answer (`finish_reason=length` in 5 of 8 direct probes), and the planner
-  reported that as `not_json`. The cap is now 2048, and a reply cut at the cap is
-  reported as `truncated at max_tokens`, not as bad JSON. pass^3 went from 0.92 to
-  0.96, with no eval case changed.
+  reported that as `not_json`. The cap is now 2048, and every backend (Groq, Hugging
+  Face, watsonx, Ollama) reports a reply cut at the cap as `truncated at max_tokens`,
+  not as bad JSON; all four providers name that stop `"length"`. pass^3 went from 0.92
+  to 0.96, with no eval case changed.
 - **Rate limits scored as wrong answers.** The free tier allows 8,000 tokens per minute
   per model, and the eval sends its calls back to back. On one rerun the SDK gave up
   after its default 2 retries and the `429`s counted as failures: pass^3 fell to 0.67 in
@@ -287,8 +288,6 @@ scripts/           mutation_check.py
   number as model accuracy.
 - gpt-oss is not deterministic at temperature 0: the same prompt gave different replies
   across runs, which is why the suite reports pass^k next to pass@k.
-- Only the Groq backend checks for a reply cut at the token cap. On the other
-  providers a truncated reply would still show up as `not_json`.
 - The lexer's identifier denylist cannot tell a table from a column: a column named
   like a hidden table, or an unquoted column named like a denied keyword (`set`,
   `show`), is rejected. Quoting it works.
