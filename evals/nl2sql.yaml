@@ -203,3 +203,91 @@
   question: Will it rain in San Jose tomorrow?
   gold: null
   expect: {status: [unanswerable, rejected]}
+
+# --- harder questions, added 2026-10-18 -----------------------------------------------
+# The first 24 cases are all solved by every model tried (live pass@3 1.00 on 2026-10-17),
+# so they no longer separate models. These need window functions, anti-joins, per-group
+# ranking or the list-price column. They were written and committed before any live run,
+# and a case is never reworded to fit a model's answer.
+
+- id: biggest-month-over-month-jump
+  question: Which month had the largest increase in paid revenue over the month before, and how big was the increase?
+  gold: |
+    SELECT m, revenue - prev AS increase FROM (
+        SELECT month(o.order_date) AS m,
+               sum(i.quantity * i.unit_price) AS revenue,
+               lag(sum(i.quantity * i.unit_price)) OVER (ORDER BY month(o.order_date)) AS prev
+        FROM order_items i JOIN orders o USING (order_id)
+        WHERE o.status = 'paid'
+        GROUP BY month(o.order_date)
+    )
+    WHERE prev IS NOT NULL
+    ORDER BY increase DESC
+    LIMIT 1
+
+- id: customers-using-all-three-channels
+  question: How many customers have placed orders through all three sales channels?
+  gold: |
+    SELECT count(*) FROM (
+        SELECT customer_id FROM orders GROUP BY customer_id HAVING count(DISTINCT channel) = 3
+    )
+
+- id: top-product-per-category
+  question: In each product category, which product brought in the most revenue?
+  gold: |
+    SELECT category, name FROM (
+        SELECT p.category, p.name,
+               row_number() OVER (PARTITION BY p.category ORDER BY sum(i.quantity * i.unit_price) DESC) AS rk
+        FROM order_items i
+        JOIN orders o USING (order_id)
+        JOIN products p USING (product_id)
+        WHERE o.status = 'paid'
+        GROUP BY p.category, p.name
+    )
+    WHERE rk = 1
+
+- id: enterprise-share-of-revenue
+  question: What percentage of paid revenue comes from enterprise customers?
+  gold: |
+    SELECT 100.0 * sum(i.quantity * i.unit_price) FILTER (WHERE c.segment = 'enterprise')
+           / sum(i.quantity * i.unit_price)
+    FROM order_items i
+    JOIN orders o USING (order_id)
+    JOIN customers c USING (customer_id)
+    WHERE o.status = 'paid'
+
+- id: customers-above-average-revenue
+  question: Among customers with at least one paid order, how many brought in more paid revenue than the average of those customers?
+  gold: |
+    WITH per_customer AS (
+        SELECT o.customer_id, sum(i.quantity * i.unit_price) AS revenue
+        FROM order_items i JOIN orders o USING (order_id)
+        WHERE o.status = 'paid'
+        GROUP BY o.customer_id
+    )
+    SELECT count(*) FROM per_customer WHERE revenue > (SELECT avg(revenue) FROM per_customer)
+
+- id: second-half-revenue
+  question: What was the paid revenue in the second half of 2025, from July through December?
+  gold: |
+    SELECT sum(i.quantity * i.unit_price)
+    FROM order_items i JOIN orders o USING (order_id)
+    WHERE o.status = 'paid' AND o.order_date >= DATE '2025-07-01'
+
+- id: discount-below-list-price
+  question: On paid orders, how much less did we charge in total than the products' list prices?
+  gold: |
+    SELECT sum(i.quantity * (p.unit_price - i.unit_price))
+    FROM order_items i
+    JOIN orders o USING (order_id)
+    JOIN products p USING (product_id)
+    WHERE o.status = 'paid'
+
+- id: average-days-from-signup-to-first-order
+  question: On average, how many days passed between a customer signing up and placing their first order?
+  gold: |
+    SELECT avg(d) FROM (
+        SELECT date_diff('day', c.signup_date, min(o.order_date)) AS d
+        FROM customers c JOIN orders o USING (customer_id)
+        GROUP BY c.customer_id, c.signup_date
+    )
